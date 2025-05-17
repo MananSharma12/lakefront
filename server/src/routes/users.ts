@@ -25,7 +25,11 @@ export default function userRoutes(db: PostgresJsDatabase) {
 
     router.post("/login", async (req: Request, res: Response) => {
         const {email, password} = req.body;
-        const user = await db.select(usersTable).where(usersTable.email.eq(email))
+        const user = await db
+            .select()
+            .from(usersTable)
+            .where(usersTable.email.eq(email))
+            .limit(1);
 
         if (user.length === 0) {
             return res.status(401).json({
@@ -41,5 +45,12 @@ export default function userRoutes(db: PostgresJsDatabase) {
         }
 
         const token = jwt.sign({user}, process.env.JWT_SECRET!, {})
-    })
+
+        return res.status(200).json({
+            message: "Login successful",
+            token,
+        });
+    });
+
+    return router;
 }

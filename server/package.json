@@ -7,6 +7,7 @@
   "type": "commonjs",
   "main": "index.js",
   "scripts": {
+    "start": "npx ts-node src/server.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
@@ -16,11 +17,13 @@
     "drizzle-orm": "^0.43.1",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
-    "pg": "^8.15.6"
+    "pg": "^8.15.6",
+    "postgres": "^3.4.5"
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",
     "@types/express": "^5.0.1",
+    "@types/jsonwebtoken": "^9.0.9",
     "@types/node": "^22.15.16",
     "drizzle-kit": "^0.31.1",
     "ts-node": "^10.9.2",
