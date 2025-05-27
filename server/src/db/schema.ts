@@ -11,3 +11,5 @@ export const usersTable = pgTable("users", {
 export async function createUser(email: string, passwordHash: string) {
     return db.insert(usersTable).values({email, password_hash: passwordHash});
 }
+
+
