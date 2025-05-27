@@ -13,9 +13,8 @@ interface AuthenticatedRequest extends Request {
 
 function authenticateToken(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
     const authHeader = req.headers['authorization'];
+    authHeader
     const token = authHeader && authHeader.split(' ')[1];
-
-    console.log(token);
 
     if (!token) {
         res.status(401).json({ message: 'Access token required' });
