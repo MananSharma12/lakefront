@@ -4,6 +4,12 @@ import { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { createRoom, getRoomByCode, endRoom, roomsTable, usersTable } from "../db/schema";
 import { eq } from "drizzle-orm";
 
+interface JwtPayload {
+    id: number;
+    email: string;
+    [key: string]: any;
+}
+
 interface AuthenticatedRequest extends Request {
     user?: {
         id: number;
@@ -13,7 +19,6 @@ interface AuthenticatedRequest extends Request {
 
 function authenticateToken(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
     const authHeader = req.headers['authorization'];
-    authHeader
     const token = authHeader && authHeader.split(' ')[1];
 
     if (!token) {
@@ -21,12 +26,13 @@ function authenticateToken(req: AuthenticatedRequest, res: Response, next: NextF
         return;
     }
 
-    jwt.verify(token, process.env.JWT_SECRET!, (err: any, user: any) => {
+    jwt.verify(token, process.env.JWT_SECRET!, (err, decoded) => {
         if (err) {
             res.status(403).json({ message: 'Invalid token' });
             return;
         }
-        req.user = user;
+        const payload = decoded as JwtPayload;
+        req.user = { id: payload.id, email: payload.email };
         next();
     });
 }

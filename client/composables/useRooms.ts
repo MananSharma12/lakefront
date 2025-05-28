@@ -5,7 +5,7 @@ export const useRooms = () => {
         return await $fetch<{ room: any; message: string }>('/api/rooms', {
             method: 'POST',
             headers: {
-                Authorization: `${token.value}`
+                Authorization: `Bearer ${token.value}`
             },
             body: { title },
             baseURL: 'http://localhost:4000'
@@ -22,7 +22,7 @@ export const useRooms = () => {
         return await $fetch<{ message: string }>(`/api/rooms/${roomCode}`, {
             method: 'DELETE',
             headers: {
-                Authorization: `${token.value}`
+                Authorization: `Bearer ${token.value}`
             },
             baseURL: 'http://localhost:4000'
         })
@@ -31,7 +31,7 @@ export const useRooms = () => {
     const getUserRooms = async () => {
         return await $fetch<{ rooms: any[] }>('/api/rooms', {
             headers: {
-                Authorization: `${token.value}`
+                Authorization: `Bearer ${token.value}`
             },
             baseURL: 'http://localhost:4000'
         })

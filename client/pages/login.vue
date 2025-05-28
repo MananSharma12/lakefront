@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { z } from 'zod'
 
 const { login } = useAuth()
