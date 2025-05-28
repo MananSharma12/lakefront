@@ -6,7 +6,7 @@ export const useAuth = () => {
         const data = await $fetch<{ token: string; message: string }>('/api/users/login', {
             method: 'POST',
             body: { email, password },
-            baseURL: 'http://localhost:4000'
+            baseURL: import.meta.env.VITE_API_URL || 'http://localhost:4000'
         })
 
         token.value = data.token
@@ -21,7 +21,7 @@ export const useAuth = () => {
         return await $fetch<{ message: string }>('/api/users', {
             method: 'POST',
             body: { email, password },
-            baseURL: 'http://localhost:4000'
+            baseURL: import.meta.env.VITE_API_URL || 'http://localhost:4000'
         })
     }
 

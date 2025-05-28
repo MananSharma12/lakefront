@@ -8,13 +8,13 @@ export const useRooms = () => {
                 Authorization: `Bearer ${token.value}`
             },
             body: { title },
-            baseURL: 'http://localhost:4000'
+            baseURL: import.meta.env.VITE_API_URL || 'http://localhost:4000'
         })
     }
 
     const joinRoom = async (roomCode: string) => {
         return await $fetch<{ room: any }>(`/api/rooms/${roomCode}`, {
-            baseURL: 'http://localhost:4000'
+            baseURL: import.meta.env.VITE_API_URL || 'http://localhost:4000'
         })
     }
 
@@ -24,7 +24,7 @@ export const useRooms = () => {
             headers: {
                 Authorization: `Bearer ${token.value}`
             },
-            baseURL: 'http://localhost:4000'
+            baseURL: import.meta.env.VITE_API_URL || 'http://localhost:4000'
         })
     }
 
@@ -33,7 +33,7 @@ export const useRooms = () => {
             headers: {
                 Authorization: `Bearer ${token.value}`
             },
-            baseURL: 'http://localhost:4000'
+            baseURL: import.meta.env.VITE_API_URL || 'http://localhost:4000'
         })
     }
 

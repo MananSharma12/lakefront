@@ -13,6 +13,7 @@ const toast = useToast()
 const roomCode = route.params.code.toUpperCase()
 const loading = ref(true)
 const loadingMessage = ref('Joining room...')
+
 interface RoomInfo {
   isCreator: boolean;
   [key: string]: any;
@@ -22,15 +23,16 @@ const roomInfo = ref<RoomInfo | null>(null)
 const isHost = ref(false)
 
 const localVideo = ref<HTMLVideoElement | null>(null)
-const remoteVideo = ref<HTMLVideoElement | null>(null)
 const localStream = ref<MediaStream | null>(null)
-const peerConnection = ref<RTCPeerConnection | null>(null)
 const socket = ref<Socket | null>(null)
-const remoteSocketId = ref<string | null>(null)
+
+const peerConnections = ref<Map<string, RTCPeerConnection>>(new Map())
+const remoteStreams = ref<Map<string, MediaStream>>(new Map())
 
 const isAudioEnabled = ref(true)
 const isVideoEnabled = ref(true)
 const connectionStatus = ref('disconnected')
+
 interface Participant {
   socketId: string;
   isHost: boolean;
@@ -40,8 +42,9 @@ interface Participant {
 const participants = ref<Participant[]>([])
 
 const ICE_SERVERS = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' }
+  {urls: 'stun:stun.l.google.com:19302'},
+  {urls: 'stun:stun1.l.google.com:19302'},
+  {urls: 'stun:stun2.l.google.com:19302'}
 ]
 
 onMounted(async () => {
@@ -60,21 +63,34 @@ onMounted(async () => {
       return navigateTo('/')
     }
 
+    loadingMessage.value = 'Accessing camera and microphone...'
+    await setupMediaDevices()
+
     loadingMessage.value = 'Connecting to signaling server...'
     const serverUrl = import.meta.env.VITE_API_URL || 'http://localhost:4000'
 
     socket.value = io(serverUrl, {
-      auth: { token }
+      auth: {token},
+      transports: ['websocket', 'polling']
     })
 
     setupSocketListeners()
 
-    loadingMessage.value = 'Accessing camera and microphone...'
-    await setupMediaDevices()
+    socket.value.on('connect', () => {
+      console.log('Socket connected:', socket.value?.id)
+      socket.value?.emit('join-room', {
+        roomCode,
+        isHost: isHost.value
+      })
+    })
 
-    socket.value.emit('join-room', {
-      roomCode, 
-      isHost: isHost.value 
+    socket.value.on('connect_error', (error) => {
+      console.error('Socket connection error:', error)
+      toast.add({
+        title: 'Connection failed',
+        description: 'Failed to connect to signaling server',
+        color: 'error'
+      })
     })
 
     loading.value = false
@@ -90,25 +106,39 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  cleanup()
+})
+
+const cleanup = () => {
   if (socket.value) {
-    socket.value.emit('leave-room', { roomCode })
+    socket.value.emit('leave-room', {roomCode})
     socket.value.disconnect()
   }
 
-  if (peerConnection.value) {
-    peerConnection.value.close()
-  }
+  peerConnections.value.forEach(pc => {
+    pc.close()
+  })
+  peerConnections.value.clear()
+  remoteStreams.value.clear()
 
   if (localStream.value) {
     localStream.value.getTracks().forEach(track => track.stop())
   }
-})
+}
 
 const setupMediaDevices = async (): Promise<MediaStream | null> => {
   try {
     localStream.value = await navigator.mediaDevices.getUserMedia({
-      audio: true,
-      video: true
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      },
+      video: {
+        width: {ideal: 1280},
+        height: {ideal: 720},
+        frameRate: {ideal: 30}
+      }
     })
 
     if (localVideo.value) {
@@ -118,27 +148,48 @@ const setupMediaDevices = async (): Promise<MediaStream | null> => {
     return localStream.value
   } catch (error) {
     console.error('Error accessing media devices:', error)
-    toast.add({
-      title: 'Media access denied',
-      description: 'Please allow access to your camera and microphone',
-      color: 'error'
-    })
-    throw error
+
+    try {
+      localStream.value = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: {width: 640, height: 480}
+      })
+
+      if (localVideo.value) {
+        localVideo.value.srcObject = localStream.value
+      }
+
+      return localStream.value
+    } catch (fallbackError) {
+      toast.add({
+        title: 'Media access denied',
+        description: 'Please allow access to your camera and microphone',
+        color: 'error'
+      })
+      throw fallbackError
+    }
   }
 }
 
 const createPeerConnection = (targetId: string): RTCPeerConnection => {
-  const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+  console.log('Creating peer connection for:', targetId)
+
+  const pc = new RTCPeerConnection({
+    iceServers: ICE_SERVERS,
+    iceCandidatePoolSize: 10
+  })
 
   if (localStream.value) {
     localStream.value.getTracks().forEach(track => {
+      console.log('Adding local track:', track.kind)
       pc.addTrack(track, localStream.value!)
     })
   }
 
   pc.onicecandidate = (event: RTCPeerConnectionIceEvent) => {
     if (event.candidate) {
-      socket.value.emit('ice-candidate', {
+      console.log('Sending ICE candidate to:', targetId)
+      socket.value?.emit('ice-candidate', {
         candidate: event.candidate,
         targetId
       })
@@ -146,20 +197,52 @@ const createPeerConnection = (targetId: string): RTCPeerConnection => {
   }
 
   pc.onconnectionstatechange = () => {
-    connectionStatus.value = pc.connectionState
+    console.log(`Connection state for ${targetId}:`, pc.connectionState)
+    updateConnectionStatus()
   }
 
   pc.ontrack = (event: RTCTrackEvent) => {
-    if (remoteVideo.value) {
-      remoteVideo.value.srcObject = event.streams[0]
+    console.log('Received remote track from:', targetId, event.track.kind)
+    if (event.streams && event.streams[0]) {
+      remoteStreams.value.set(targetId, event.streams[0])
     }
   }
+
+  peerConnections.value.set(targetId, pc)
+  updateConnectionStatus()
 
   return pc
 }
 
+const updateConnectionStatus = () => {
+  if (peerConnections.value.size === 0) {
+    connectionStatus.value = 'disconnected'
+    return
+  }
+
+  const states = Array.from(peerConnections.value.values()).map(pc => pc.connectionState)
+
+  if (states.some(state => state === 'failed')) {
+    connectionStatus.value = 'failed'
+  } else if (states.some(state => state === 'disconnected')) {
+    connectionStatus.value = 'disconnected'
+  } else if (states.some(state => state === 'connecting')) {
+    connectionStatus.value = 'connecting'
+  } else if (states.every(state => state === 'connected')) {
+    connectionStatus.value = 'connected'
+  } else {
+    connectionStatus.value = 'connecting'
+  }
+}
+
 interface RoomJoinedEvent {
   participants: Participant[];
+}
+
+interface UserJoinedEvent {
+  socketId: string;
+  isHost: boolean;
+  email?: string;
 }
 
 interface UserLeftEvent {
@@ -185,107 +268,144 @@ interface IceCandidateEvent {
 const setupSocketListeners = (): void => {
   if (!socket.value) return
 
-  socket.value.on('room-joined', ({ participants: roomParticipants }: RoomJoinedEvent) => {
+  socket.value.on('room-joined', ({participants: roomParticipants}: RoomJoinedEvent) => {
+    console.log('Room joined, existing participants:', roomParticipants.length)
     participants.value = roomParticipants
 
-    if (roomParticipants.length > 0) {
-      remoteSocketId.value = roomParticipants[0].socketId
-
-      if (isHost.value) {
-        initiateCall(remoteSocketId.value)
+    roomParticipants.forEach(participant => {
+      if (socket.value?.id && socket.value.id > participant.socketId) {
+        console.log('Initiating call to existing participant:', participant.socketId)
+        setTimeout(() => initiateCall(participant.socketId), 1000)
       }
+    })
+  })
+
+  socket.value.on('user-joined', (participant: UserJoinedEvent) => {
+    console.log('User joined:', participant.socketId)
+
+    const newParticipant: Participant = {
+      socketId: participant.socketId,
+      isHost: participant.isHost,
+      email: participant.email
+    }
+
+    participants.value.push(newParticipant)
+
+    if (socket.value?.id && socket.value.id < participant.socketId) {
+      console.log('Initiating call to new participant:', participant.socketId)
+      setTimeout(() => initiateCall(participant.socketId), 1000)
     }
   })
 
-  socket.value.on('user-joined', (participant: Participant) => {
-    participants.value.push(participant)
-    remoteSocketId.value = participant.socketId
+  socket.value.on('user-left', ({socketId}: UserLeftEvent) => {
+    console.log('User left:', socketId)
 
-    if (isHost.value) {
-      initiateCall(participant.socketId)
-    }
-  })
-
-  socket.value.on('user-left', ({ socketId }: UserLeftEvent) => {
     participants.value = participants.value.filter(p => p.socketId !== socketId)
 
-    if (socketId === remoteSocketId.value) {
-      if (remoteVideo.value) {
-        remoteVideo.value.srcObject = null
-      }
-      remoteSocketId.value = null
-
-      if (peerConnection.value) {
-        peerConnection.value.close()
-        peerConnection.value = null
-      }
-
-      connectionStatus.value = 'disconnected'
+    if (peerConnections.value.has(socketId)) {
+      const pc = peerConnections.value.get(socketId)
+      pc?.close()
+      peerConnections.value.delete(socketId)
     }
+
+    if (remoteStreams.value.has(socketId)) {
+      remoteStreams.value.delete(socketId)
+    }
+
+    updateConnectionStatus()
   })
 
-  // Handle incoming offers
-  socket.value.on('offer', async ({ offer, fromId }: OfferEvent) => {
+  socket.value.on('offer', async ({offer, fromId}: OfferEvent) => {
+    console.log('Received offer from:', fromId)
+
     try {
-      remoteSocketId.value = fromId
-      peerConnection.value = createPeerConnection(fromId)
+      if (!peerConnections.value.has(fromId)) {
+        createPeerConnection(fromId)
+      }
 
-      await peerConnection.value.setRemoteDescription(new RTCSessionDescription(offer))
-      const answer = await peerConnection.value.createAnswer()
-      await peerConnection.value.setLocalDescription(answer)
+      const pc = peerConnections.value.get(fromId)
+      if (!pc) {
+        console.error('No peer connection for:', fromId)
+        return
+      }
 
-      socket.value.emit('answer', {
+      await pc.setRemoteDescription(new RTCSessionDescription(offer))
+      console.log('Set remote description for:', fromId)
+
+      const answer = await pc.createAnswer()
+      await pc.setLocalDescription(answer)
+      console.log('Created answer for:', fromId)
+
+      socket.value?.emit('answer', {
         roomCode,
         answer,
         targetId: fromId
       })
     } catch (error) {
-      console.error('Error handling offer:', error)
+      console.error('Error handling offer from', fromId, ':', error)
     }
   })
 
-  // Handle incoming answers
-  socket.value.on('answer', async ({ answer, fromId }: AnswerEvent) => {
+  socket.value.on('answer', async ({answer, fromId}: AnswerEvent) => {
+    console.log('Received answer from:', fromId)
+
     try {
-      if (peerConnection.value) {
-        await peerConnection.value.setRemoteDescription(new RTCSessionDescription(answer))
+      const pc = peerConnections.value.get(fromId)
+      if (pc && pc.signalingState === 'have-local-offer') {
+        await pc.setRemoteDescription(new RTCSessionDescription(answer))
+        console.log('Set remote description (answer) for:', fromId)
       }
     } catch (error) {
-      console.error('Error handling answer:', error)
+      console.error('Error handling answer from', fromId, ':', error)
     }
   })
 
-  // Handle incoming ICE candidates
-  socket.value.on('ice-candidate', async ({ candidate, fromId }: IceCandidateEvent) => {
+  socket.value.on('ice-candidate', async ({candidate, fromId}: IceCandidateEvent) => {
+    console.log('Received ICE candidate from:', fromId)
+
     try {
-      if (peerConnection.value) {
-        await peerConnection.value.addIceCandidate(new RTCIceCandidate(candidate))
+      const pc = peerConnections.value.get(fromId)
+      if (pc && pc.remoteDescription) {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate))
+        console.log('Added ICE candidate for:', fromId)
+      } else {
+        console.warn('Cannot add ICE candidate, no remote description for:', fromId)
       }
     } catch (error) {
-      console.error('Error adding ICE candidate:', error)
+      console.error('Error adding ICE candidate from', fromId, ':', error)
     }
   })
 }
 
-// Initiate a call to another user
 const initiateCall = async (targetId: string): Promise<void> => {
+  console.log('Initiating call to:', targetId)
+
   try {
-    peerConnection.value = createPeerConnection(targetId)
+    if (peerConnections.value.has(targetId)) {
+      console.log('Peer connection already exists for:', targetId)
+      return
+    }
 
-    const offer = await peerConnection.value.createOffer()
-    await peerConnection.value.setLocalDescription(offer)
+    const pc = createPeerConnection(targetId)
 
-    socket.value.emit('offer', {
+    const offer = await pc.createOffer({
+      offerToReceiveAudio: true,
+      offerToReceiveVideo: true
+    })
+
+    await pc.setLocalDescription(offer)
+    console.log('Created offer for:', targetId)
+
+    socket.value?.emit('offer', {
       roomCode,
       offer,
       targetId
     })
   } catch (error) {
-    console.error('Error initiating call:', error)
+    console.error('Error initiating call to', targetId, ':', error)
   }
 }
 
-// Toggle audio
 const toggleAudio = (): void => {
   if (localStream.value) {
     const audioTrack = localStream.value.getAudioTracks()[0]
@@ -296,7 +416,6 @@ const toggleAudio = (): void => {
   }
 }
 
-// Toggle video
 const toggleVideo = (): void => {
   if (localStream.value) {
     const videoTrack = localStream.value.getVideoTracks()[0]
@@ -312,49 +431,48 @@ const handleEndCall = async (): Promise<void> => {
     if (isHost.value) {
       await endRoom(roomCode)
     }
-
-    if (socket.value) {
-      socket.value.emit('leave-room', { roomCode })
-    }
-
+    cleanup()
     navigateTo('/')
   } catch (error) {
     console.error('Error ending call:', error)
+    navigateTo('/')
   }
 }
 </script>
 
 <template>
   <div class="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <!-- Loading Screen -->
     <div v-if="loading" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
       <div class="text-center text-white">
-        <UIcon name="i-heroicons-arrow-path" class="animate-spin h-12 w-12 mx-auto mb-4" />
+        <UIcon name="i-material-symbols:change-circle-outline" class="animate-spin h-12 w-12 mx-auto mb-4"/>
         <h2 class="text-xl font-semibold mb-2">{{ loadingMessage }}</h2>
         <p class="text-gray-300">Please wait...</p>
       </div>
     </div>
 
+    <!-- Header -->
     <header class="bg-white dark:bg-gray-800 shadow">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div class="flex justify-between h-16 items-center">
           <div class="flex items-center">
             <h1 class="text-xl font-semibold">Room: {{ roomCode }}</h1>
-            <span 
-              class="ml-4 px-2 py-1 text-xs rounded-full"
-              :class="{
-                'bg-green-100 text-green-800': connectionStatus === 'connected',
-                'bg-yellow-100 text-yellow-800': connectionStatus === 'connecting',
-                'bg-red-100 text-red-800': connectionStatus === 'disconnected' || connectionStatus === 'failed'
+            <span
+                class="ml-4 px-2 py-1 text-xs rounded-full"
+                :class="{
+                'bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-100': connectionStatus === 'connected',
+                'bg-yellow-100 text-yellow-800 dark:bg-yellow-800 dark:text-yellow-100': connectionStatus === 'connecting',
+                'bg-red-100 text-red-800 dark:bg-red-800 dark:text-red-100': connectionStatus === 'disconnected' || connectionStatus === 'failed'
               }"
             >
               {{ connectionStatus }}
             </span>
           </div>
           <div>
-            <UButton 
-              color="primary"
-              @click="handleEndCall"
-              icon="i-heroicons-phone-x-mark"
+            <UButton
+                color="error"
+                @click="handleEndCall"
+                icon="i-material-symbols:call-end"
             >
               End Call
             </UButton>
@@ -363,41 +481,72 @@ const handleEndCall = async (): Promise<void> => {
       </div>
     </header>
 
+    <!-- Main Content -->
     <main class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
-      <!-- Video grid -->
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <!-- Local video -->
+      <!-- Video Grid -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <!-- Local Video -->
         <div class="relative bg-gray-800 rounded-lg overflow-hidden aspect-video">
-          <video 
-            ref="localVideo" 
-            autoplay 
-            muted 
-            playsinline
-            class="w-full h-full object-cover"
+          <video
+              ref="localVideo"
+              autoplay
+              muted
+              playsinline
+              class="w-full h-full object-cover"
           ></video>
           <div class="absolute bottom-4 left-4 bg-black bg-opacity-50 px-3 py-1 rounded-full text-white text-sm">
             You {{ isHost ? '(Host)' : '' }}
           </div>
-        </div>
-
-        <!-- Remote video -->
-        <div class="relative bg-gray-800 rounded-lg overflow-hidden aspect-video">
-          <video 
-            v-if="remoteSocketId"
-            ref="remoteVideo" 
-            autoplay 
-            playsinline
-            class="w-full h-full object-cover"
-          ></video>
-          <div v-else class="absolute inset-0 flex items-center justify-center text-white">
-            <div class="text-center">
-              <UIcon name="i-heroicons-user" class="h-16 w-16 mx-auto mb-4" />
-              <p>Waiting for someone to join...</p>
+          <!-- Video status indicators -->
+          <div class="absolute top-4 right-4 flex space-x-2">
+            <div v-if="!isAudioEnabled" class="bg-red-500 rounded p-1">
+              <UIcon name="i-material-symbols:mic-off" class="text-white"/>
+            </div>
+            <div v-if="!isVideoEnabled" class="bg-red-500 rounded p-1">
+              <UIcon name="i-material-symbols:videocam-off" class="text-white"/>
             </div>
           </div>
-          <div v-if="remoteSocketId" class="absolute bottom-4 left-4 bg-black bg-opacity-50 px-3 py-1 rounded-full text-white text-sm">
-            {{ participants.find(p => p.socketId === remoteSocketId)?.email || 'Guest' }}
-            {{ participants.find(p => p.socketId === remoteSocketId)?.isHost ? '(Host)' : '' }}
+        </div>
+
+        <!-- Remote Videos -->
+        <template v-if="participants.length > 0">
+          <div
+              v-for="participant in participants"
+              :key="participant.socketId"
+              class="relative bg-gray-800 rounded-lg overflow-hidden aspect-video"
+          >
+            <video
+                v-if="remoteStreams.has(participant.socketId)"
+                :ref="el => {
+                if (el && remoteStreams.has(participant.socketId)) {
+                  el.srcObject = remoteStreams.get(participant.socketId)
+                }
+              }"
+                autoplay
+                playsinline
+                class="w-full h-full object-cover"
+            ></video>
+            <div v-else class="absolute inset-0 flex items-center justify-center text-white">
+              <div class="text-center">
+                <UIcon name="i-material-symbols:person" class="h-16 w-16 mx-auto mb-4"/>
+                <p>Connecting...</p>
+              </div>
+            </div>
+            <div class="absolute bottom-4 left-4 bg-black bg-opacity-50 px-3 py-1 rounded-full text-white text-sm">
+              {{ participant.email || 'Guest' }}
+              {{ participant.isHost ? '(Host)' : '' }}
+            </div>
+          </div>
+        </template>
+
+        <!-- Waiting Message -->
+        <div v-if="participants.length === 0" class="relative bg-gray-800 rounded-lg overflow-hidden aspect-video">
+          <div class="absolute inset-0 flex items-center justify-center text-white">
+            <div class="text-center">
+              <UIcon name="i-material-symbols:person" class="h-16 w-16 mx-auto mb-4"/>
+              <p>Waiting for someone to join...</p>
+              <p class="text-sm text-gray-400 mt-2">Share code: {{ roomCode }}</p>
+            </div>
           </div>
         </div>
       </div>
@@ -405,45 +554,53 @@ const handleEndCall = async (): Promise<void> => {
       <!-- Controls -->
       <div class="mt-6 flex justify-center space-x-4">
         <UButton
-          :color="isAudioEnabled ? 'secondary' : 'error'"
-          @click="toggleAudio"
-          :icon="isAudioEnabled ? 'i-heroicons-microphone' : 'i-heroicons-microphone-slash'"
-          variant="soft"
+            :color="isAudioEnabled ? 'neutral' : 'error'"
+            @click="toggleAudio"
+            :icon="isAudioEnabled ? 'i-material-symbols:mic' : 'i-material-symbols:mic-off'"
+            variant="soft"
         >
           {{ isAudioEnabled ? 'Mute' : 'Unmute' }}
         </UButton>
 
         <UButton
-          :color="isVideoEnabled ? 'secondary' : 'error'"
-          @click="toggleVideo"
-          :icon="isVideoEnabled ? 'i-heroicons-video-camera' : 'i-heroicons-video-camera-slash'"
-          variant="soft"
+            :color="isVideoEnabled ? 'neutral' : 'error'"
+            @click="toggleVideo"
+            :icon="isVideoEnabled ? 'i-material-symbols:videocam' : 'i-material-symbols:videocam-off'"
+            variant="soft"
         >
           {{ isVideoEnabled ? 'Hide Video' : 'Show Video' }}
         </UButton>
       </div>
 
+      <!-- Participants List -->
       <div class="mt-8">
         <h2 class="text-lg font-medium mb-4">Participants ({{ participants.length + 1 }})</h2>
         <ul class="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
+          <!-- Current User -->
           <li class="px-4 py-3 flex items-center justify-between border-b border-gray-200 dark:border-gray-700">
             <div class="flex items-center">
-              <UIcon name="i-heroicons-user-circle" class="h-6 w-6 mr-3 text-gray-500" />
+              <UIcon name="i-material-symbols:account-circle" class="h-6 w-6 mr-3 text-gray-500"/>
               <span>{{ user?.email || 'You' }} {{ isHost ? '(Host)' : '' }}</span>
             </div>
             <UBadge color="success">You</UBadge>
           </li>
 
           <li
-            v-for="participant in participants" 
-            :key="participant.socketId"
-            class="px-4 py-3 flex items-center justify-between border-b border-gray-200 dark:border-gray-700 last:border-0"
+              v-for="participant in participants"
+              :key="participant.socketId"
+              class="px-4 py-3 flex items-center justify-between border-b border-gray-200 dark:border-gray-700 last:border-0"
           >
             <div class="flex items-center">
-              <UIcon name="i-heroicons-user-circle" class="h-6 w-6 mr-3 text-gray-500" />
+              <UIcon name="i-material-symbols:account-circle" class="h-6 w-6 mr-3 text-gray-500"/>
               <span>{{ participant.email || 'Guest' }} {{ participant.isHost ? '(Host)' : '' }}</span>
             </div>
-            <UBadge v-if="participant.socketId === remoteSocketId" color="neutral">Connected</UBadge>
+            <UBadge
+                :color="peerConnections.has(participant.socketId) && peerConnections.get(participant.socketId)?.connectionState === 'connected' ? 'success' : 'warning'"
+            >
+              {{
+                peerConnections.has(participant.socketId) && peerConnections.get(participant.socketId)?.connectionState === 'connected' ? 'Connected' : 'Connecting'
+              }}
+            </UBadge>
           </li>
         </ul>
       </div>
