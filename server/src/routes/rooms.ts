@@ -67,8 +67,6 @@ export default function roomRoutes(db: PostgresJsDatabase) {
         try {
             const { roomCode } = req.params;
             const room = await getRoomByCode(roomCode);
-            console.log(roomCode)
-            console.log("room", room)
 
             if (!room) {
                 return res.status(404).json({ message: 'Room not found' });

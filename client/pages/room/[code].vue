@@ -70,14 +70,13 @@ onMounted(async () => {
     const serverUrl = import.meta.env.VITE_API_URL || 'http://localhost:4000'
 
     socket.value = io(serverUrl, {
-      auth: {token},
+      auth: {token: token.value},
       transports: ['websocket', 'polling']
     })
 
     setupSocketListeners()
 
     socket.value.on('connect', () => {
-      console.log('Socket connected:', socket.value?.id)
       socket.value?.emit('join-room', {
         roomCode,
         isHost: isHost.value
@@ -172,8 +171,6 @@ const setupMediaDevices = async (): Promise<MediaStream | null> => {
 }
 
 const createPeerConnection = (targetId: string): RTCPeerConnection => {
-  console.log('Creating peer connection for:', targetId)
-
   const pc = new RTCPeerConnection({
     iceServers: ICE_SERVERS,
     iceCandidatePoolSize: 10
@@ -181,15 +178,14 @@ const createPeerConnection = (targetId: string): RTCPeerConnection => {
 
   if (localStream.value) {
     localStream.value.getTracks().forEach(track => {
-      console.log('Adding local track:', track.kind)
       pc.addTrack(track, localStream.value!)
     })
   }
 
   pc.onicecandidate = (event: RTCPeerConnectionIceEvent) => {
     if (event.candidate) {
-      console.log('Sending ICE candidate to:', targetId)
       socket.value?.emit('ice-candidate', {
+        roomCode,
         candidate: event.candidate,
         targetId
       })
@@ -197,12 +193,10 @@ const createPeerConnection = (targetId: string): RTCPeerConnection => {
   }
 
   pc.onconnectionstatechange = () => {
-    console.log(`Connection state for ${targetId}:`, pc.connectionState)
     updateConnectionStatus()
   }
 
   pc.ontrack = (event: RTCTrackEvent) => {
-    console.log('Received remote track from:', targetId, event.track.kind)
     if (event.streams && event.streams[0]) {
       remoteStreams.value.set(targetId, event.streams[0])
     }
@@ -269,14 +263,10 @@ const setupSocketListeners = (): void => {
   if (!socket.value) return
 
   socket.value.on('room-joined', ({participants: roomParticipants}: RoomJoinedEvent) => {
-    console.log('Room joined, existing participants:', roomParticipants.length)
     participants.value = roomParticipants
 
     roomParticipants.forEach(participant => {
-      if (socket.value?.id && socket.value.id > participant.socketId) {
-        console.log('Initiating call to existing participant:', participant.socketId)
-        setTimeout(() => initiateCall(participant.socketId), 1000)
-      }
+      initiateCall(participant.socketId);
     })
   })
 
@@ -516,15 +506,9 @@ const handleEndCall = async (): Promise<void> => {
               class="relative bg-gray-800 rounded-lg overflow-hidden aspect-video"
           >
             <video
-                v-if="remoteStreams.has(participant.socketId)"
-                :ref="el => {
-                if (el && remoteStreams.has(participant.socketId)) {
-                  el.srcObject = remoteStreams.get(participant.socketId)
-                }
-              }"
-                autoplay
-                playsinline
-                class="w-full h-full object-cover"
+              v-if="remoteStreams.has(participant.socketId)"
+              :srcObject="remoteStreams.get(participant.socketId)"
+              autoplay playsinline class="w-full h-full object-cover"
             ></video>
             <div v-else class="absolute inset-0 flex items-center justify-center text-white">
               <div class="text-center">

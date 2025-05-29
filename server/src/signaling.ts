@@ -42,12 +42,10 @@ export function setupSignaling(httpServer: HttpServer): Server {
         if (token) {
             jwt.verify(token, process.env.JWT_SECRET!, (err: any, decoded: any) => {
                 if (err) {
-                    console.log("Invalid token for socket:", socket.id);
                     return next(new Error("Invalid token"));
                 } else {
                     const payload = decoded as JwtPayload;
                     socket.data.user = { id: payload.id, email: payload.email };
-                    console.log("Authenticated user:", payload.email, "for socket:", socket.id);
                 }
                 next();
             });
@@ -75,6 +73,7 @@ export function setupSignaling(httpServer: HttpServer): Server {
     }
 
     interface IceCandidateData {
+        roomCode: string;
         candidate: RTCIceCandidateInit;
         targetId: string;
     }
@@ -90,20 +89,14 @@ export function setupSignaling(httpServer: HttpServer): Server {
             if (room.participants.size === 0 &&
                 (now.getTime() - room.createdAt.getTime()) > 5 * 60 * 1000) {
                 rooms.delete(roomCode);
-                console.log(`Cleaned up empty room: ${roomCode}`);
             }
         }
     }, 60000);
 
     io.on("connection", (socket: Socket) => {
-        console.log("User Connected:", socket.id, socket.data.user?.email || 'Guest');
-
         socket.on('join-room', ({ roomCode, isHost }: JoinRoomData) => {
             roomCode = roomCode.toUpperCase();
-            console.log(`User ${socket.id} (${socket.data.user?.email || 'Guest'}) joining room ${roomCode} as ${isHost ? 'host' : 'guest'}`);
-
             if (!rooms.has(roomCode)) {
-                console.log(`Creating new room: ${roomCode}`);
                 rooms.set(roomCode, {
                     code: roomCode,
                     participants: new Map(),
@@ -114,7 +107,6 @@ export function setupSignaling(httpServer: HttpServer): Server {
             const room = rooms.get(roomCode)!;
 
             if (room.participants.has(socket.id)) {
-                console.log(`User ${socket.id} is already in room ${roomCode}`);
                 return;
             }
 
@@ -130,7 +122,6 @@ export function setupSignaling(httpServer: HttpServer): Server {
 
             if (isHost && !room.hostSocketId) {
                 room.hostSocketId = socket.id;
-                console.log(`Set ${socket.id} as host for room ${roomCode}`);
             }
 
             socket.join(roomCode);
@@ -152,13 +143,10 @@ export function setupSignaling(httpServer: HttpServer): Server {
             socket.emit('room-joined', {
                 participants: existingParticipants
             });
-
-            console.log(`Room ${roomCode} now has ${room.participants.size} participants`);
         });
 
         socket.on('offer', ({ roomCode, offer, targetId }: OfferData) => {
             roomCode = roomCode.toUpperCase();
-            console.log(`Relaying offer from ${socket.id} to ${targetId} in room ${roomCode}`);
 
             const room = rooms.get(roomCode);
             if (room && room.participants.has(socket.id) && room.participants.has(targetId)) {
@@ -173,7 +161,6 @@ export function setupSignaling(httpServer: HttpServer): Server {
 
         socket.on('answer', ({ roomCode, answer, targetId }: AnswerData) => {
             roomCode = roomCode.toUpperCase();
-            console.log(`Relaying answer from ${socket.id} to ${targetId} in room ${roomCode}`);
 
             const room = rooms.get(roomCode);
             if (room && room.participants.has(socket.id) && room.participants.has(targetId)) {
@@ -186,34 +173,26 @@ export function setupSignaling(httpServer: HttpServer): Server {
             }
         });
 
-        socket.on('ice-candidate', ({ candidate, targetId }: IceCandidateData) => {
-            console.log(`Relaying ICE candidate from ${socket.id} to ${targetId}`);
+        socket.on('ice-candidate', ({ roomCode, candidate, targetId }: IceCandidateData) => {
+            roomCode = roomCode.toUpperCase(); // Consistent casing
+            const room = rooms.get(roomCode);
 
-            let foundRoom = false;
-            for (const [roomCode, room] of rooms.entries()) {
-                if (room.participants.has(socket.id) && room.participants.has(targetId)) {
-                    socket.to(targetId).emit('ice-candidate', {
-                        candidate,
-                        fromId: socket.id
-                    });
-                    foundRoom = true;
-                    break;
-                }
-            }
-
-            if (!foundRoom) {
-                console.warn(`Invalid ICE candidate relay attempt from ${socket.id} to ${targetId}`);
+            if (room && room.participants.has(socket.id) && room.participants.has(targetId)) {
+                socket.to(targetId).emit('ice-candidate', {
+                    candidate,
+                    fromId: socket.id
+                });
+            } else {
+                console.warn(`Invalid ICE candidate relay attempt in room ${roomCode} from ${socket.id} to ${targetId}`);
             }
         });
 
         socket.on('disconnect', () => {
-            console.log('User disconnected:', socket.id, socket.data.user?.email || 'Guest');
             handleUserLeaving(socket.id);
         });
 
         socket.on('leave-room', ({ roomCode }: LeaveRoomData) => {
             roomCode = roomCode.toUpperCase();
-            console.log(`User ${socket.id} leaving room ${roomCode}`);
 
             const room = rooms.get(roomCode);
             if (room && room.participants.has(socket.id)) {
@@ -249,10 +228,7 @@ export function setupSignaling(httpServer: HttpServer): Server {
 
                 if (room.participants.size === 0) {
                     rooms.delete(roomCode);
-                    console.log(`Deleted empty room: ${roomCode}`);
                 }
-
-                console.log(`Room ${roomCode} now has ${room.participants.size} participants`);
             }
         });
 
@@ -277,8 +253,6 @@ export function setupSignaling(httpServer: HttpServer): Server {
                     room.hostSocketId = newHost.socketId;
                     newHost.isHost = true;
 
-                    console.log(`Assigned new host ${newHost.socketId} for room ${roomCode} after disconnect`);
-
                     io.to(newHost.socketId).emit('host-assigned', {
                         roomCode,
                         isHost: true
@@ -292,10 +266,7 @@ export function setupSignaling(httpServer: HttpServer): Server {
 
                 if (room.participants.size === 0) {
                     rooms.delete(roomCode);
-                    console.log(`Deleted empty room after disconnect: ${roomCode}`);
                 }
-
-                console.log(`User ${socketId} removed from room ${roomCode}, ${room.participants.size} participants remaining`);
                 break;
             }
         }
