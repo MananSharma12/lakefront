@@ -30,6 +30,7 @@ export function setupSignaling(httpServer: HttpServer): Server {
             credentials: true,
             methods: ["GET", "POST"]
         },
+        transports: ['websocket'],
         pingTimeout: 60000,
         pingInterval: 25000
     });
