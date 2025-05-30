@@ -14,6 +14,9 @@ export const useRooms = () => {
 
     const joinRoom = async (roomCode: string) => {
         return await $fetch<{ room: any }>(`/api/rooms/${roomCode}`, {
+            headers: {
+                Authorization: `Bearer ${token.value}`
+            },
             baseURL: import.meta.env.VITE_API_URL || 'http://localhost:4000'
         })
     }

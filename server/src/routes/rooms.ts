@@ -63,7 +63,7 @@ export default function roomRoutes(db: PostgresJsDatabase) {
         }
     }) as unknown as Router);
 
-    router.get("/:roomCode", (async (req: Request, res: Response) => {
+    router.get("/:roomCode", authenticateToken, (async (req: AuthenticatedRequest, res: Response) => {
         try {
             const { roomCode } = req.params;
             const room = await getRoomByCode(roomCode);
@@ -82,6 +82,9 @@ export default function roomRoutes(db: PostgresJsDatabase) {
                 .where(eq(usersTable.id, room.host_id))
                 .limit(1);
 
+            const userId = req.user!.id;
+            const isCreator = userId === room.host_id;
+
             return res.status(200).json({
                 room: {
                     id: room.id,
@@ -89,7 +92,8 @@ export default function roomRoutes(db: PostgresJsDatabase) {
                     title: room.title,
                     hostEmail: host?.email,
                     isActive: room.is_active,
-                    createdAt: room.created_at
+                    createdAt: room.created_at,
+                    isCreator
                 }
             });
         } catch (error) {

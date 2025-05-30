@@ -69,7 +69,7 @@ const copyRoomLink = async () => {
   }
 }
 
-const goToRoom = (roomCode) => {
+const goToRoom = (roomCode: string) => {
   navigateTo(`/room/${roomCode}`)
 }
 </script>

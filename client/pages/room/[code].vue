@@ -15,12 +15,17 @@ const loading = ref(true)
 const loadingMessage = ref('Joining room...')
 
 interface RoomInfo {
+  id: number;
+  roomCode: string;
+  title: string | null;
+  hostEmail: string;
+  isActive: true;
+  createdAt: Date | null;
   isCreator: boolean;
-  [key: string]: any;
 }
 
 const roomInfo = ref<RoomInfo | null>(null)
-const isHost = ref(false)
+const isHost = ref<boolean | undefined>(false)
 
 const localVideo = ref<HTMLVideoElement | null>(null)
 const localStream = ref<MediaStream | null>(null)
@@ -53,7 +58,7 @@ onMounted(async () => {
 
     try {
       roomInfo.value = await joinRoom(roomCode)
-      isHost.value = roomInfo.value.isCreator
+      isHost.value = roomInfo.value.room.isCreator
     } catch (error) {
       toast.add({
         title: 'Room not found',
@@ -271,8 +276,6 @@ const setupSocketListeners = (): void => {
   })
 
   socket.value.on('user-joined', (participant: UserJoinedEvent) => {
-    console.log('User joined:', participant.socketId)
-
     const newParticipant: Participant = {
       socketId: participant.socketId,
       isHost: participant.isHost,
@@ -282,14 +285,11 @@ const setupSocketListeners = (): void => {
     participants.value.push(newParticipant)
 
     if (socket.value?.id && socket.value.id < participant.socketId) {
-      console.log('Initiating call to new participant:', participant.socketId)
       setTimeout(() => initiateCall(participant.socketId), 1000)
     }
   })
 
   socket.value.on('user-left', ({socketId}: UserLeftEvent) => {
-    console.log('User left:', socketId)
-
     participants.value = participants.value.filter(p => p.socketId !== socketId)
 
     if (peerConnections.value.has(socketId)) {
@@ -306,8 +306,6 @@ const setupSocketListeners = (): void => {
   })
 
   socket.value.on('offer', async ({offer, fromId}: OfferEvent) => {
-    console.log('Received offer from:', fromId)
-
     try {
       if (!peerConnections.value.has(fromId)) {
         createPeerConnection(fromId)
@@ -320,11 +318,9 @@ const setupSocketListeners = (): void => {
       }
 
       await pc.setRemoteDescription(new RTCSessionDescription(offer))
-      console.log('Set remote description for:', fromId)
 
       const answer = await pc.createAnswer()
       await pc.setLocalDescription(answer)
-      console.log('Created answer for:', fromId)
 
       socket.value?.emit('answer', {
         roomCode,
@@ -337,13 +333,10 @@ const setupSocketListeners = (): void => {
   })
 
   socket.value.on('answer', async ({answer, fromId}: AnswerEvent) => {
-    console.log('Received answer from:', fromId)
-
     try {
       const pc = peerConnections.value.get(fromId)
       if (pc && pc.signalingState === 'have-local-offer') {
         await pc.setRemoteDescription(new RTCSessionDescription(answer))
-        console.log('Set remote description (answer) for:', fromId)
       }
     } catch (error) {
       console.error('Error handling answer from', fromId, ':', error)
@@ -351,15 +344,10 @@ const setupSocketListeners = (): void => {
   })
 
   socket.value.on('ice-candidate', async ({candidate, fromId}: IceCandidateEvent) => {
-    console.log('Received ICE candidate from:', fromId)
-
     try {
       const pc = peerConnections.value.get(fromId)
       if (pc && pc.remoteDescription) {
         await pc.addIceCandidate(new RTCIceCandidate(candidate))
-        console.log('Added ICE candidate for:', fromId)
-      } else {
-        console.warn('Cannot add ICE candidate, no remote description for:', fromId)
       }
     } catch (error) {
       console.error('Error adding ICE candidate from', fromId, ':', error)
@@ -368,11 +356,8 @@ const setupSocketListeners = (): void => {
 }
 
 const initiateCall = async (targetId: string): Promise<void> => {
-  console.log('Initiating call to:', targetId)
-
   try {
     if (peerConnections.value.has(targetId)) {
-      console.log('Peer connection already exists for:', targetId)
       return
     }
 
@@ -384,7 +369,6 @@ const initiateCall = async (targetId: string): Promise<void> => {
     })
 
     await pc.setLocalDescription(offer)
-    console.log('Created offer for:', targetId)
 
     socket.value?.emit('offer', {
       roomCode,
