@@ -22,7 +22,8 @@
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.15.6",
     "postgres": "^3.4.5",
-    "socket.io": "^4.8.1"
+    "socket.io": "^4.8.1",
+    "twilio": "^5.7.0"
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",
@@ -33,7 +34,6 @@
     "drizzle-kit": "^0.31.1",
     "nodemon": "^3.1.10",
     "ts-node": "^10.9.2",
-    "tsx": "^4.19.4",
     "typescript": "^5.8.3"
   }
 }

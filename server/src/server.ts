@@ -8,6 +8,7 @@ dotenv.config()
 import { db } from "./db"
 import userRoutes from "./routes/users";
 import roomRoutes from "./routes/rooms";
+import iceServerRoutes from "./routes/iceServers";
 import { setupSignaling } from "./signaling";
 
 const app = express()
@@ -25,6 +26,7 @@ app.use(express.urlencoded({ extended: true }))
 
 app.use("/api/users", userRoutes(db))
 app.use("/api/rooms", roomRoutes(db))
+app.use("/api/ice-servers", iceServerRoutes())
 
 app.get("/", (req: Request, res: Response) => {
     res.json({ message: "Server is running 🚀" });

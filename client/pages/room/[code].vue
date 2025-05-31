@@ -8,6 +8,7 @@ definePageMeta({
 const route = useRoute()
 const { user, token } = useAuth()
 const { joinRoom, endRoom } = useRooms()
+const { getIceServers } = useIceServers()
 const toast = useToast()
 
 const roomCode = route.params.code.toUpperCase()
@@ -46,14 +47,33 @@ interface Participant {
 
 const participants = ref<Participant[]>([])
 
-const ICE_SERVERS = [
-  {urls: 'stun:stun.l.google.com:19302'},
-  {urls: 'stun:stun1.l.google.com:19302'},
-  {urls: 'stun:stun2.l.google.com:19302'}
-]
+const ICE_SERVERS_CONFIG = ref<RTCIceServer[]>([])
 
 onMounted(async () => {
   try {
+    loadingMessage.value = 'Fetching ICE configuration...';
+    try {
+      const fetchedIceServers = await getIceServers()
+      if (!fetchedIceServers.length) {
+        throw new Error(`Failed to fetch ICE servers: ${response.statusText}`);
+      }
+      if (fetchedIceServers && fetchedIceServers.length > 0) {
+        ICE_SERVERS_CONFIG.value = fetchedIceServers;
+        console.log('Fetched ICE Servers from backend:', ICE_SERVERS_CONFIG.value);
+      } else {
+        ICE_SERVERS_CONFIG.value = [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' }
+        ];
+      }
+    } catch (iceError) {
+      ICE_SERVERS_CONFIG.value = [
+        {urls: 'stun:stun.l.google.com:19302'},
+        {urls: 'stun:stun1.l.google.com:19302'},
+        {urls: 'stun:stun2.l.google.com:19302'}
+      ];
+    }
+
     loadingMessage.value = 'Checking room...'
 
     try {
@@ -176,8 +196,9 @@ const setupMediaDevices = async (): Promise<MediaStream | null> => {
 }
 
 const createPeerConnection = (targetId: string): RTCPeerConnection => {
+  console.log('Using ICE Servers:', ICE_SERVERS_CONFIG.value); // Log what's being used
   const pc = new RTCPeerConnection({
-    iceServers: ICE_SERVERS,
+    iceServers: ICE_SERVERS_CONFIG.value,
     iceCandidatePoolSize: 10
   })
 
