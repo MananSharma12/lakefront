@@ -1,21 +1,9 @@
-import { Router, Request, Response, NextFunction } from "express";
+import { Router, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { createRoom, getRoomByCode, endRoom, roomsTable, usersTable } from "../db/schema";
 import { eq } from "drizzle-orm";
-
-interface JwtPayload {
-    id: number;
-    email: string;
-    [key: string]: any;
-}
-
-interface AuthenticatedRequest extends Request {
-    user?: {
-        id: number;
-        email: string
-    };
-}
+import { JwtPayload, AuthenticatedRequest } from "../types";
 
 function authenticateToken(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
     const authHeader = req.headers['authorization'];

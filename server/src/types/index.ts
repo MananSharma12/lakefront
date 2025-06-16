@@ -1,3 +1,5 @@
+import { Request } from 'express';
+
 interface JwtPayload {
     id: number;
     email: string;
@@ -46,6 +48,13 @@ interface LeaveRoomData {
     roomCode: string;
 }
 
+interface AuthenticatedRequest extends Request {
+    user?: {
+        id: number;
+        email: string
+    };
+}
+
 export {
     JwtPayload,
     RoomParticipant,
@@ -54,5 +63,6 @@ export {
     OfferData,
     AnswerData,
     IceCandidateData,
-    LeaveRoomData
+    LeaveRoomData,
+    AuthenticatedRequest,
 }
