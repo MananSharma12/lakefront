@@ -1,27 +1,16 @@
 import { Server, Socket } from "socket.io";
 import jwt from "jsonwebtoken";
 import { Server as HttpServer } from "http";
-
-interface JwtPayload {
-    id: number;
-    email: string;
-    [key: string]: any;
-}
-
-interface RoomParticipant {
-    socketId: string;
-    userId?: number;
-    email?: string;
-    isHost: boolean;
-    joinedAt: Date;
-}
-
-interface Room {
-    code: string;
-    participants: Map<string, RoomParticipant>;
-    hostSocketId?: string;
-    createdAt: Date;
-}
+import type {
+    JwtPayload,
+    Room,
+    RoomParticipant,
+    JoinRoomData,
+    LeaveRoomData,
+    AnswerData,
+    OfferData,
+    IceCandidateData
+} from "./types";
 
 export function setupSignaling(httpServer: HttpServer): Server {
     const io = new Server(httpServer, {
@@ -55,33 +44,6 @@ export function setupSignaling(httpServer: HttpServer): Server {
             next();
         }
     });
-
-    interface JoinRoomData {
-        roomCode: string;
-        isHost: boolean;
-    }
-
-    interface OfferData {
-        roomCode: string;
-        offer: RTCSessionDescriptionInit;
-        targetId: string;
-    }
-
-    interface AnswerData {
-        roomCode: string;
-        answer: RTCSessionDescriptionInit;
-        targetId: string;
-    }
-
-    interface IceCandidateData {
-        roomCode: string;
-        candidate: RTCIceCandidateInit;
-        targetId: string;
-    }
-
-    interface LeaveRoomData {
-        roomCode: string;
-    }
 
     const cleanupInterval = setInterval(() => {
         const now = new Date();
@@ -214,8 +176,6 @@ export function setupSignaling(httpServer: HttpServer): Server {
                     room.hostSocketId = newHost.socketId;
                     newHost.isHost = true;
 
-                    console.log(`Assigned new host ${newHost.socketId} for room ${roomCode}`);
-
                     io.to(newHost.socketId).emit('host-assigned', {
                         roomCode,
                         isHost: true
@@ -271,25 +231,6 @@ export function setupSignaling(httpServer: HttpServer): Server {
                 break;
             }
         }
-    }
-
-    process.on('SIGTERM', () => {
-        console.log('Shutting down signaling server...');
-        clearInterval(cleanupInterval);
-        io.close(() => {
-            console.log('Signaling server closed');
-        });
-    });
-
-    if (process.env.NODE_ENV === 'development') {
-        setInterval(() => {
-            if (rooms.size > 0) {
-                console.log(`Active rooms: ${rooms.size}`);
-                for (const [code, room] of rooms.entries()) {
-                    console.log(`  Room ${code}: ${room.participants.size} participants`);
-                }
-            }
-        }, 30000);
     }
 
     return io;

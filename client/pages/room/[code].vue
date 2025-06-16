@@ -59,7 +59,6 @@ onMounted(async () => {
       }
       if (fetchedIceServers && fetchedIceServers.length > 0) {
         ICE_SERVERS_CONFIG.value = fetchedIceServers;
-        console.log('Fetched ICE Servers from backend:', ICE_SERVERS_CONFIG.value);
       } else {
         ICE_SERVERS_CONFIG.value = [
           { urls: 'stun:stun.l.google.com:19302' },
@@ -196,7 +195,6 @@ const setupMediaDevices = async (): Promise<MediaStream | null> => {
 }
 
 const createPeerConnection = (targetId: string): RTCPeerConnection => {
-  console.log('Using ICE Servers:', ICE_SERVERS_CONFIG.value); // Log what's being used
   const pc = new RTCPeerConnection({
     iceServers: ICE_SERVERS_CONFIG.value,
     iceCandidatePoolSize: 10

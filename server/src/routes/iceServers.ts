@@ -16,14 +16,7 @@ export default function iceServerRoutes(): Router {
         const client = twilio(accountSid, authToken);
 
         try {
-            // The token TTL (time-to-live) is in seconds.
-            // Default is 86400 (24 hours), but you might want shorter for security.
-            // For a call session, a few hours should be plenty (e.g., 4 * 3600 = 4 hours)
             const token = await client.tokens.create({ ttl: 3600 * 4 }); // TTL of 4 hours
-
-            // token.iceServers will contain an array of STUN and TURN server configurations
-            // including urls, username, and credential (password) for TURN.
-            console.log('Twilio ICE Servers fetched:', JSON.stringify(token.iceServers, null, 2));
             return res.status(200).json(token.iceServers);
 
         } catch (error) {
