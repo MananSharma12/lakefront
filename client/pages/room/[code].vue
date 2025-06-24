@@ -1,6 +1,16 @@
 <script setup lang="ts">
 import { io, Socket } from 'socket.io-client'
 
+import type {
+  RoomInfo,
+  RoomJoinedEvent,
+  UserJoinedEvent,
+  UserLeftEvent,
+  OfferEvent,
+  AnswerEvent,
+  IceCandidateEvent,
+} from '~/types'
+
 definePageMeta({
   middleware: 'auth'
 })
@@ -15,16 +25,6 @@ const roomCode = route.params.code.toUpperCase()
 const loading = ref(true)
 const loadingMessage = ref('Joining room...')
 
-interface RoomInfo {
-  id: number;
-  roomCode: string;
-  title: string | null;
-  hostEmail: string;
-  isActive: true;
-  createdAt: Date | null;
-  isCreator: boolean;
-}
-
 const roomInfo = ref<RoomInfo | null>(null)
 const isHost = ref<boolean | undefined>(false)
 
@@ -38,12 +38,6 @@ const remoteStreams = ref<Map<string, MediaStream>>(new Map())
 const isAudioEnabled = ref(true)
 const isVideoEnabled = ref(true)
 const connectionStatus = ref('disconnected')
-
-interface Participant {
-  socketId: string;
-  isHost: boolean;
-  email?: string;
-}
 
 const participants = ref<Participant[]>([])
 
@@ -251,36 +245,6 @@ const updateConnectionStatus = () => {
   } else {
     connectionStatus.value = 'connecting'
   }
-}
-
-interface RoomJoinedEvent {
-  participants: Participant[];
-}
-
-interface UserJoinedEvent {
-  socketId: string;
-  isHost: boolean;
-  email?: string;
-}
-
-interface UserLeftEvent {
-  socketId: string;
-  isHost: boolean;
-}
-
-interface OfferEvent {
-  offer: RTCSessionDescriptionInit;
-  fromId: string;
-}
-
-interface AnswerEvent {
-  answer: RTCSessionDescriptionInit;
-  fromId: string;
-}
-
-interface IceCandidateEvent {
-  candidate: RTCIceCandidateInit;
-  fromId: string;
 }
 
 const setupSocketListeners = (): void => {
